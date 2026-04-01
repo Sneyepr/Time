@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>Weekly Time Tracker</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0f0f0f; }
+    input[type=number]::-webkit-inner-spin-button,
+    input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; }
+    ::-webkit-scrollbar { display: none; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    const DAYS = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+    const STORAGE_KEY = "time_tracker_v1";
+
+    function sessionDurationMs(s) {
+      let startMin = s.startH * 60 + s.startM;
+      let endMin = s.endH * 60 + s.endM;
+      if (endMin <= startMin) endMin += 24 * 60;
+      return (endMin - startMin) * 60000;
+    }
+
+    function formatHours(ms) {
+      if (!ms || ms <= 0) return "0h 0m";
+      const totalMin = Math.floor(ms / 60000);
+      return `${Math.floor(totalMin / 60)}h ${totalMin % 60}m`;
+    }
+
+    function formatDisplay(h, m) {
+      const period = h >= 12 ? "PM" : "AM";
+      const h12 = h % 12 === 0 ? 12 : h % 12;
+      return `${h12}:${String(m).padStart(2, "0")} ${period}`;
+    }
+
+    function toDecimalHours(ms) { return ms / 3600000; }
+    const emptyWeek = () => DAYS.map(() => ({ sessions: [] }));
+
+    function App() {
+      const todayIndex = (() => { const d = new Date().getDay(); return d === 0 ? 6 : d - 1; })();
+
+      const [activeDay, setActiveDay] = useState(todayIndex);
+      const [payRate, setPayRate] = useState("");
+      const [entries, setEntries] = useState(emptyWeek);
+      const [startInput, setStartInput] = useState("");
+      const [endInput, setEndInput] = useState("");
+      const [error, setError] = useState("");
+      const [showClearConfirm, setShowClearConfirm] = useState(false);
+
+      useEffect(() => {
+        try {
+          const saved = localStorage.getItem(STORAGE_KEY);
+          if (saved) {
+            const { entries: e, payRate: r } = JSON.parse(saved);
+            if (e) setEntries(e);
+            if (r) setPayRate(r);
+          }
+        } catch {}
+      }, []);
+
+      useEffect(() => {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify({ entries, payRate }));
+        } catch {}
+      }, [entries, payRate]);
+
+      function addSession() {
+        setError("");
+        if (!startInput || !endInput) { setError("Enter both start and end times."); return; }
+        const [sh, sm] = startInput.split(":").map(Number);
+        const [eh, em] = endInput.split(":").map(Number);
+        const newSession = { startH: sh, startM: sm, endH: eh, endM: em };
+        const ms = sessionDurationMs(newSession);
+        if (ms === 0) { setError("Start and end time are the same."); return; }
+        setEntries(prev => {
+          const updated = [...prev];
+          updated[activeDay] = { sessions: [...updated[activeDay].sessions, newSession] };
+          return updated;
+        });
+        setStartInput("");
+        setEndInput("");
+      }
+
+      function deleteSession(dayIdx, i) {
+        setEntries(prev => {
+          const updated = [...prev];
+          const sessions = [...updated[dayIdx].sessions];
+          sessions.splice(i, 1);
+          updated[dayIdx] = { sessions };
+          return updated;
+        });
+      }
+
+      function clearWeek() {
+        setEntries(emptyWeek());
+        setShowClearConfirm(false);
+      }
+
+      function dayTotalMs(entry) {
+        return entry.sessions.reduce((sum, s) => sum + sessionDurationMs(s), 0);
+      }
+
+      const weekTotalMs = entries.reduce((sum, e) => sum + dayTotalMs(e), 0);
+      const rate = parseFloat(payRate);
+      const validRate = !isNaN(rate) && rate > 0;
+      const earned = validRate ? (toDecimalHours(weekTotalMs) * rate).toFixed(2) : null;
+      const currentEntry = entries[activeDay];
+
+      return (
+        <div style={{
+          minHeight: "100vh",
+          background: "#0f0f0f",
+          color: "#f0ede8",
+          fontFamily: "'DM Mono', 'Courier New', monospace",
+          maxWidth: 480,
+          margin: "0 auto",
+          paddingBottom: 80,
+        }}>
+
+          {/* Header */}
+          <div style={{
+            background: "#141414",
+            borderBottom: "1px solid #232323",
+            padding: "18px 20px 14px",
+            position: "sticky",
+            top: 0,
+            zIndex: 10,
+          }}>
+            <div style={{ fontSize: 10, letterSpacing: 3, color: "#555", marginBottom: 6, textTransform: "uppercase" }}>
+              Weekly Time Tracker
+            </div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div>
+                <span style={{ fontSize: 26, fontWeight: 700 }}>{formatHours(weekTotalMs)}</span>
+                <span style={{ fontSize: 12, color: "#555", marginLeft: 8 }}>this week</span>
+              </div>
+              {validRate && earned && (
+                <div style={{
+                  background: "#162416",
+                  border: "1px solid #2a4a2a",
+                  borderRadius: 8,
+                  padding: "6px 14px",
+                  textAlign: "right",
+                }}>
+                  <div style={{ fontSize: 9, color: "#4a8a4a", letterSpacing: 2, textTransform: "uppercase" }}>Earned</div>
+                  <div style={{ fontSize: 20, color: "#6ec96e", fontWeight: 700 }}>${earned}</div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Pay Rate */}
+          <div style={{ padding: "14px 20px", borderBottom: "1px solid #1e1e1e", display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ fontSize: 10, letterSpacing: 2, color: "#555", textTransform: "uppercase", minWidth: 70 }}>Hourly Rate</div>
+            <span style={{ color: "#555" }}>$</span>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="0.00"
+              value={payRate}
+              onChange={e => setPayRate(e.target.value)}
+              style={{
+                background: "#1a1a1a",
+                border: "1px solid #2a2a2a",
+                borderRadius: 6,
+                color: "#f0ede8",
+                fontFamily: "inherit",
+                fontSize: 16,
+                padding: "7px 10px",
+                width: 100,
+                outline: "none",
+              }}
+            />
+            <span style={{ color: "#444", fontSize: 12 }}>/hr</span>
+          </div>
+
+          {/* Day Tabs */}
+          <div style={{
+            display: "flex",
+            gap: 5,
+            padding: "12px 20px",
+            overflowX: "auto",
+            borderBottom: "1px solid #1a1a1a",
+          }}>
+            {DAYS.map((d, i) => {
+              const ms = dayTotalMs(entries[i]);
+              const isActive = activeDay === i;
+              const isToday = i === todayIndex;
+              return (
+                <button key={d} onClick={() => setActiveDay(i)} style={{
+                  flex: "0 0 auto",
+                  padding: "8px 10px",
+                  borderRadius: 7,
+                  border: isActive ? "1px solid #444" : "1px solid #1e1e1e",
+                  background: isActive ? "#252525" : "transparent",
+                  color: isActive ? "#f0ede8" : ms > 0 ? "#888" : "#3a3a3a",
+                  fontFamily: "inherit",
+                  fontSize: 10,
+                  letterSpacing: 1,
+                  cursor: "pointer",
+                  textAlign: "center",
+                  position: "relative",
+                  transition: "all 0.12s",
+                }}>
+                  <div style={{ textTransform: "uppercase" }}>{d.slice(0, 3)}</div>
+                  {ms > 0 && <div style={{ fontSize: 9, marginTop: 2, color: isActive ? "#777" : "#444" }}>{formatHours(ms)}</div>}
+                  {isToday && (
+                    <div style={{
+                      position: "absolute", top: 3, right: 3,
+                      width: 4, height: 4, borderRadius: "50%", background: "#6ec96e",
+                    }} />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Active Day Panel */}
+          <div style={{ padding: "18px 20px 0" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 600 }}>{DAYS[activeDay]}</div>
+                <div style={{ fontSize: 11, color: "#555", marginTop: 2 }}>
+                  {formatHours(dayTotalMs(currentEntry))} logged
+                  {validRate && dayTotalMs(currentEntry) > 0 && (
+                    <span style={{ color: "#4a7a4a", marginLeft: 8 }}>
+                      ${(toDecimalHours(dayTotalMs(currentEntry)) * rate).toFixed(2)}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Time Entry Form */}
+            <div style={{
+              background: "#181818",
+              border: "1px solid #252525",
+              borderRadius: 10,
+              padding: "14px",
+              marginBottom: 16,
+            }}>
+              <div style={{ fontSize: 10, letterSpacing: 2, color: "#555", marginBottom: 12, textTransform: "uppercase" }}>
+                Add Session
+              </div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 10, alignItems: "center" }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 9, color: "#555", marginBottom: 4, letterSpacing: 1 }}>START</div>
+                  <input
+                    type="time"
+                    value={startInput}
+                    onChange={e => setStartInput(e.target.value)}
+                    style={{
+                      width: "100%",
+                      background: "#111",
+                      border: "1px solid #2a2a2a",
+                      borderRadius: 6,
+                      color: "#f0ede8",
+                      fontFamily: "inherit",
+                      fontSize: 15,
+                      padding: "8px 10px",
+                      outline: "none",
+                      colorScheme: "dark",
+                    }}
+                  />
+                </div>
+                <div style={{ color: "#333", paddingTop: 18 }}>to</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 9, color: "#555", marginBottom: 4, letterSpacing: 1 }}>END</div>
+                  <input
+                    type="time"
+                    value={endInput}
+                    onChange={e => setEndInput(e.target.value)}
+                    style={{
+                      width: "100%",
+                      background: "#111",
+                      border: "1px solid #2a2a2a",
+                      borderRadius: 6,
+                      color: "#f0ede8",
+                      fontFamily: "inherit",
+                      fontSize: 15,
+                      padding: "8px 10px",
+                      outline: "none",
+                      colorScheme: "dark",
+                    }}
+                  />
+                </div>
+              </div>
+              {error && <div style={{ fontSize: 11, color: "#e05a5a", marginBottom: 8 }}>{error}</div>}
+              <button
+                onClick={addSession}
+                style={{
+                  width: "100%",
+                  padding: "10px",
+                  borderRadius: 7,
+                  border: "none",
+                  background: startInput && endInput ? "#1a2e1a" : "#1a1a1a",
+                  color: startInput && endInput ? "#6ec96e" : "#333",
+                  fontFamily: "inherit",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  letterSpacing: 2,
+                  textTransform: "uppercase",
+                  cursor: "pointer",
+                  transition: "all 0.12s",
+                }}
+              >
+                Add Session
+              </button>
+            </div>
+
+            {/* Sessions List */}
+            {currentEntry.sessions.length > 0 && (
+              <div>
+                <div style={{ fontSize: 10, letterSpacing: 2, color: "#444", marginBottom: 10, textTransform: "uppercase" }}>
+                  Sessions
+                </div>
+                {currentEntry.sessions.map((s, i) => {
+                  const ms = sessionDurationMs(s);
+                  return (
+                    <div key={i} style={{
+                      background: "#161616",
+                      border: "1px solid #222",
+                      borderRadius: 8,
+                      padding: "10px 14px",
+                      marginBottom: 7,
+                      display: "flex",
+                      alignItems: "center",
+                    }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, color: "#ccc" }}>
+                          {formatDisplay(s.startH, s.startM)} &rarr; {formatDisplay(s.endH, s.endM)}
+                        </div>
+                        <div style={{ fontSize: 11, color: "#555", marginTop: 2 }}>
+                          {formatHours(ms)}
+                          {validRate && (
+                            <span style={{ color: "#4a7a4a", marginLeft: 8 }}>
+                              ${(toDecimalHours(ms) * rate).toFixed(2)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <button onClick={() => deleteSession(activeDay, i)} style={{
+                        background: "transparent",
+                        border: "none",
+                        color: "#3a3a3a",
+                        cursor: "pointer",
+                        fontSize: 18,
+                        padding: "2px 8px",
+                      }}>×</button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {currentEntry.sessions.length === 0 && (
+              <div style={{ textAlign: "center", padding: "30px 0", color: "#2a2a2a", fontSize: 12 }}>
+                No sessions for {DAYS[activeDay].toLowerCase()}.
+              </div>
+            )}
+          </div>
+
+          {/* Clear Week */}
+          <div style={{ padding: "30px 20px 0", textAlign: "center" }}>
+            {!showClearConfirm ? (
+              <button onClick={() => setShowClearConfirm(true)} style={{
+                background: "transparent",
+                border: "1px solid #2a1a1a",
+                borderRadius: 7,
+                color: "#5a3a3a",
+                fontFamily: "inherit",
+                fontSize: 11,
+                letterSpacing: 2,
+                textTransform: "uppercase",
+                padding: "8px 20px",
+                cursor: "pointer",
+              }}>
+                Clear Week
+              </button>
+            ) : (
+              <div style={{
+                background: "#1a1010",
+                border: "1px solid #3a1a1a",
+                borderRadius: 10,
+                padding: "14px",
+              }}>
+                <div style={{ fontSize: 12, color: "#c06060", marginBottom: 12 }}>
+                  This will delete all sessions for the week. Are you sure?
+                </div>
+                <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+                  <button onClick={clearWeek} style={{
+                    background: "#3a1a1a", border: "none", borderRadius: 6,
+                    color: "#e06060", fontFamily: "inherit", fontSize: 12,
+                    fontWeight: 700, padding: "8px 20px", cursor: "pointer",
+                    letterSpacing: 1, textTransform: "uppercase",
+                  }}>Yes, Clear</button>
+                  <button onClick={() => setShowClearConfirm(false)} style={{
+                    background: "#1e1e1e", border: "1px solid #2a2a2a", borderRadius: 6,
+                    color: "#666", fontFamily: "inherit", fontSize: 12,
+                    padding: "8px 20px", cursor: "pointer", letterSpacing: 1, textTransform: "uppercase",
+                  }}>Cancel</button>
+                </div>
+              </div>
+            )}
+          </div>
+
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<App />);
+  </script>
+</body>
+</html>
